@@ -281,27 +281,42 @@ const editing = new Set();
     render(data.items || []);
   }
 
-  // ---- ランダム抽選（分類フィルタ対応） ----
+  // ---- ランダム抽選（dig版） ----
   async function pickRandom(){
-    // 現在のフィルタ・検索を反映して取得
     const q = new URLSearchParams();
-    q.set('done', els.filterDone.value);
-    if(els.q.value.trim()) q.set('query', els.q.value.trim());
-    q.set('sort','default');
-    q.set('limit','200');
-
-    const res = await api('/api/todos?' + q.toString());
-    if(!res.ok){ const t = await res.text(); alert('読み込み失敗: ' + res.status + ' ' + res.statusText + '\n' + t); return; }
-    let items = (await res.json()).todos ?? [];
-
-    // ★ 分類フィルタ（titleに分類を保存している）
+    // 検索キーワードを反映
+    if (els.q.value.trim()) q.set('q', els.q.value.trim());
+  
+    // 分類フィルタ（title＝カテゴリ相当）を反映したい場合
+    // ※ 「全て」以外の時だけ tags ではなく title をサーバに渡したいなら、
+    //    今回はサーバ側は title での絞り込みをしていないので、ここでは q に含めず
+    //    一旦クライアント側で弾きます（必要なら /api/dig/random を拡張して title も受けられるようにしてOK）
     const want = els.randFilter.value;
-    if(want !== '__all__'){
-      items = items.filter(it => (it.title || 'その他') === want);
+  
+    const res = await api('/api/dig/random?' + q.toString());
+    if(!res.ok){
+      const t = await res.text();
+      alert('ランダム取得失敗: ' + res.status + ' ' + res.statusText + '\n' + t);
+      return;
     }
-
-    if(!items.length){ alert('該当データがありません'); return; }
-    const it = items[Math.floor(Math.random() * items.length)];
+    const data = await res.json();
+    let it = data.item;
+  
+    // クライアント側でカテゴリ（= title）を限定したい場合
+    if (want !== '__all__' && it && (it.title || 'その他') !== want) {
+      // 単純に数回リトライ
+      for (let i=0; i<3; i++){
+        const r2 = await api('/api/dig/random?' + q.toString());
+        if (!r2.ok) break;
+        const d2 = await r2.json();
+        if ((d2.item?.title || 'その他') === want) { it = d2.item; break; }
+      }
+      if ((it.title || 'その他') !== want) {
+        alert('指定の分類で該当が見つかりませんでした');
+        return;
+      }
+    }
+  
     showRandom(it);
   }
 
@@ -574,12 +589,6 @@ const editing = new Set();
     return out;
   }
   
-  async function toggleDone(id, v){
-    const res = await api('/api/todos/'+id, { method:'PATCH', body: JSON.stringify({ done: !!v }) });
-    if(!res.ok){ alert('更新に失敗しました'); return; }
-    reload();
-  }
-
   async function saveEdit(id, tr){
     const main = tr.querySelector('td[data-role="edit-main"]');
     if(!main){ alert('編集対象を特定できません'); return; }
