@@ -627,21 +627,9 @@ const editing = new Set();
   els.randClose.addEventListener('click', ()=>{ els.randomBox.style.display='none'; });
   els.randCancel.addEventListener('click', ()=> { randomEditing = false; buildRandomBox(); });
   
-  // 「完了にする」は dig には無いので、押したら「次のランダム」に転用:
+  // 「完了にする」は dig には無い→「次のランダム」に転用
   els.randDone.addEventListener('click', pickRandom);
   
-  els.randEdit.addEventListener('click', ()=>{ if(!currentRandom) return; randomEditing = true; buildRandomBox(); });
-  els.randCancel.addEventListener('click', ()=> cancelRandomEdit());
-  els.randSave.addEventListener('click', ()=> saveRandomEdit());
-
-  els.randDone.addEventListener('click', async ()=>{
-    if(!currentRandom) return;
-    const res = await api('/api/todos/'+currentRandom.id, { method:'PATCH', body: JSON.stringify({ done: true }) });
-    if(!res.ok){ alert('更新に失敗しました'); return; }
-    await reload();
-    pickRandom();
-  });
-
   // 初期表示
   reload().then(selfTest);
 })();
