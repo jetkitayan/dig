@@ -407,8 +407,7 @@ const editing = new Set();
     return t.split(',').map(x=>x.trim()).filter(Boolean)
       .map(x=>`<span class="chip">${x}</span>`).join(' ');
   }
-
-  // ---- 一覧描画/編集 ----
+  
   function render(items){
     els.tbody.innerHTML = '';
     els.counts.textContent = `${items.length} 件`;
@@ -416,42 +415,74 @@ const editing = new Set();
     for (const it of items){
       const tr = document.createElement('tr');
   
-      // 先頭列（#）
+      // 先頭列
       const td0 = document.createElement('td');
       td0.textContent = '•';
   
-      // 本文列（タイトル/タグ + テキスト）
+      const isEdit = editing.has(it.id);
+  
+      // 本文列
       const td1 = document.createElement('td');
-      const title = document.createElement('div');
-      title.innerHTML = `<strong>${(it.title||'').replace(/</g,'&lt;')}</strong>`;
+      if (isEdit){
+        // title をセレクトで編集（既存のカテゴリ配列を流用）
+        const catI = document.createElement('select');
+        fillSelectOptions(catI, CATEGORIES, it.title || 'その他');
+        catI.style.display = 'block';
+        catI.style.marginBottom = '6px';
   
-      const tags = document.createElement('div');
-      tags.innerHTML = renderTags(it.tags||'');
+        const textI = document.createElement('textarea');
+        textI.value = it.text || '';
+        textI.style.width = '100%';
   
-      const text = document.createElement('div');
-      text.textContent = it.text || '';
+        td1.append(catI, textI);
+        td1.dataset.role = 'edit-main';
+      }else{
+        const title = document.createElement('div');
+        title.innerHTML = `<strong>${(it.title||'').replace(/</g,'&lt;')}</strong>`;
   
-      td1.append(title, tags, text);
+        const tags = document.createElement('div');
+        tags.innerHTML = renderTags(it.tags||'');
   
-      // 時刻
+        const text = document.createElement('div');
+        text.textContent = it.text || '';
+  
+        td1.append(title, tags, text);
+      }
+  
+      // 日時列
       const td2 = document.createElement('td');
       td2.innerHTML = `<div class="counts">作成: ${fmtDate(it.created_at||'')}</div>
                        <div class="counts">更新: ${fmtDate(it.updated_at||'')}</div>`;
   
-      // 操作
+      // 操作列
       const td3 = document.createElement('td');
-      const btnEdit = document.createElement('button');
-      btnEdit.className = 'btn-ghost';
-      btnEdit.textContent = '編集';
-      btnEdit.onclick = ()=> openEdit(it);
+      if (isEdit){
+        const btnSave = document.createElement('button');
+        btnSave.className = 'btn';
+        btnSave.textContent = '保存';
+        btnSave.onclick = ()=> saveEdit(it.id, tr);
   
-      const btnDel = document.createElement('button');
-      btnDel.className = 'btn-danger';
-      btnDel.style.marginLeft = '6px';
-      btnDel.textContent = '削除';
-      btnDel.onclick = ()=> delDig(it.id);
+        const btnCancel = document.createElement('button');
+        btnCancel.className = 'btn-ghost';
+        btnCancel.style.marginLeft = '6px';
+        btnCancel.textContent = '取消';
+        btnCancel.onclick = ()=> { editing.delete(it.id); reload(); };
   
-      td3.append(btnEdit, btnDel);
+        td3.append(btnSave, btnCancel);
+      }else{
+        const btnEdit = document.createElement('button');
+        btnEdit.className = 'btn-ghost';
+        btnEdit.textContent = '編集';
+        btnEdit.onclick = ()=> openEdit(it);
+  
+        const btnDel = document.createElement('button');
+        btnDel.className = 'btn-danger';
+        btnDel.style.marginLeft = '6px';
+        btnDel.textContent = '削除';
+        btnDel.onclick = ()=> delDig(it.id);
+  
+        td3.append(btnEdit, btnDel);
+      }
   
       tr.append(td0, td1, td2, td3);
       els.tbody.appendChild(tr);
@@ -572,10 +603,15 @@ const editing = new Set();
 
   // デバッグ：自己テスト
   async function selfTest(){
-    let r = await api('/api/todos?done=all&limit=1');
-    console.log('TEST todos GET', r.status, r.statusText);
+    let r = await api('/api/dig?limit=1');
+    console.log('TEST dig GET', r.status, r.statusText);
   }
 
+  function openEdit(it){
+    editing.add(it.id);
+    reload();
+  }
+  
   // 追加：最後に使った分類を保存/復元
   const LS_LAST_CAT = 'todo_last_category_v1';
   
@@ -595,8 +631,6 @@ const editing = new Set();
   // イベント
   els.add.addEventListener('click', add);
   els.reload.addEventListener('click', reload);
-  els.filterDone.addEventListener('change', reload);
-  els.q.addEventListener('keydown', e=>{ if(e.key==='Enter') reload(); });
 
   els.random.addEventListener('click', pickRandom);
   els.randNext.addEventListener('click', pickRandom);
