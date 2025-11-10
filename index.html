@@ -386,7 +386,10 @@ const editing = new Set();
     if (!res.ok) { alert('保存に失敗しました'); return; }
   
     const one = await api('/api/dig/' + currentRandom.id);
-    if (one.ok) currentRandom = (await one.json());
+    if (one.ok) {
+      const j = await one.json();
+      currentRandom = j.item || j.todo || j; // サーバ実装に合わせて item を優先
+    }
     randomEditing = false;
     buildRandomBox();
     reload();
