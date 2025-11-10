@@ -267,15 +267,18 @@ const editing = new Set();
 
   async function reload(){
     const q = new URLSearchParams();
-    q.set('done', els.filterDone.value);
-    if(els.q.value.trim()) q.set('query', els.q.value.trim());
-    q.set('sort','default');
+    if (els.q.value.trim()) q.set('q', els.q.value.trim());
+    // タグ検索したいなら input を1つ足して q.set('tags', 'foo,bar')
     q.set('limit','100');
-
-    const res = await api('/api/todos?' + q.toString());
-    if(!res.ok){ const t = await res.text(); alert('読み込み失敗: ' + res.status + ' ' + res.statusText + '\n' + t); return; }
+  
+    const res = await api('/api/dig?' + q.toString());
+    if(!res.ok){
+      const t = await res.text();
+      alert('読み込み失敗: ' + res.status + ' ' + res.statusText + '\n' + t);
+      return;
+    }
     const data = await res.json();
-    render(data.todos || data);
+    render(data.items || []);
   }
 
   // ---- ランダム抽選（分類フィルタ対応） ----
@@ -398,95 +401,78 @@ const editing = new Set();
     buildRandomBox();
   }
 
-  function fmtDate(s){ if(!s) return ''; return s.replace('T',' ').replace('Z',''); }
+  function fmtDate(s){ if(!s) return ''; return String(s).replace('T',' ').replace('Z',''); }
+  function renderTags(t){
+    if(!t) return '';
+    return t.split(',').map(x=>x.trim()).filter(Boolean)
+      .map(x=>`<span class="chip">${x}</span>`).join(' ');
+  }
 
   // ---- 一覧描画/編集 ----
   function render(items){
     els.tbody.innerHTML = '';
-    let todo = 0, done = 0;
-    items.forEach(it=>{ if(it.done) done++; else todo++; });
-
-    for(const it of items){
+    els.counts.textContent = `${items.length} 件`;
+  
+    for (const it of items){
       const tr = document.createElement('tr');
-
+  
+      // 先頭列（#）
       const td0 = document.createElement('td');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = !!it.done;
-      cb.addEventListener('change', ()=> toggleDone(it.id, cb.checked));
-      td0.appendChild(cb);
-
-      const isEdit = editing.has(it.id);
-
+      td0.textContent = '•';
+  
+      // 本文列（タイトル/タグ + テキスト）
       const td1 = document.createElement('td');
-      if(isEdit){
-        const catI = document.createElement('select');
-        fillSelectOptions(catI, CATEGORIES, it.title || 'その他');
-        catI.style.display = 'block';
-        catI.style.marginBottom = '6px';
-
-        const textI = document.createElement('textarea');
-        textI.value = it.text || '';
-        textI.style.width = '100%';
-
-        td1.append(catI, textI);
-        td1.dataset.role = 'edit-main';
-      }else{
-        const cat = document.createElement('span');
-        cat.textContent = it.title || 'その他';
-        cat.className = 'chip';
-        cat.style.marginRight = '8px';
-
-        const text = document.createElement('div');
-        text.textContent = it.text || '';
-        if(it.done){ cat.classList.add('strike'); text.classList.add('strike'); }
-
-        td1.append(cat, text);
-      }
-
+      const title = document.createElement('div');
+      title.innerHTML = `<strong>${(it.title||'').replace(/</g,'&lt;')}</strong>`;
+  
+      const tags = document.createElement('div');
+      tags.innerHTML = renderTags(it.tags||'');
+  
+      const text = document.createElement('div');
+      text.textContent = it.text || '';
+  
+      td1.append(title, tags, text);
+  
+      // 時刻
+      const td2 = document.createElement('td');
+      td2.innerHTML = `<div class="counts">作成: ${fmtDate(it.created_at||'')}</div>
+                       <div class="counts">更新: ${fmtDate(it.updated_at||'')}</div>`;
+  
+      // 操作
       const td3 = document.createElement('td');
-      const up = document.createElement('div'); up.textContent = '更新: ' + fmtDate(it.updated_at || '');
-      const dn = document.createElement('div'); dn.textContent = it.done_at ? ('完了: ' + fmtDate(it.done_at)) : '';
-      td3.append(up, dn);
-
-      const td4 = document.createElement('td');
-      if(isEdit){
-        const btnSave = document.createElement('button'); btnSave.className='btn'; btnSave.textContent='保存';
-        btnSave.onclick = ()=> saveEdit(it.id, tr);
-        const btnCancel = document.createElement('button'); btnCancel.className='btn-ghost'; btnCancel.style.marginLeft='6px'; btnCancel.textContent='取消';
-        btnCancel.onclick = ()=> { editing.delete(it.id); reload(); };
-        td4.append(btnSave, btnCancel);
-      }else{
-        const btnEdit = document.createElement('button'); btnEdit.className='btn-ghost'; btnEdit.textContent='編集';
-        btnEdit.onclick = ()=> { editing.add(it.id); reload(); };
-        const btnDel = document.createElement('button'); btnDel.className='btn-danger'; btnDel.style.marginLeft='6px'; btnDel.textContent='削除';
-        btnDel.onclick = ()=> delTodo(it.id);
-        td4.append(btnEdit, btnDel);
-      }
-
-      tr.append(td0, td1, td3, td4);
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn-ghost';
+      btnEdit.textContent = '編集';
+      btnEdit.onclick = ()=> openEdit(it);
+  
+      const btnDel = document.createElement('button');
+      btnDel.className = 'btn-danger';
+      btnDel.style.marginLeft = '6px';
+      btnDel.textContent = '削除';
+      btnDel.onclick = ()=> delDig(it.id);
+  
+      td3.append(btnEdit, btnDel);
+  
+      tr.append(td0, td1, td2, td3);
       els.tbody.appendChild(tr);
     }
-    els.counts.textContent = `未完 ${todo} / 完了 ${done}`;
   }
 
   async function add(){
     const payload = {
-      title: els.category.value,     // 分類
-      text: els.text.value.trim(),
+      title: els.category.value || null, // ← 既存セレクトをタイトル扱いに
+      text: (els.text.value || '').trim(),
+      // tags: 'work,idea' などを入れたければここで指定
     };
     if(!payload.text){ alert('本文を入力してください'); return; }
   
-    const res = await api('/api/todos', { method:'POST', body: JSON.stringify(payload) });
+    const res = await api('/api/dig', { method:'POST', body: JSON.stringify(payload) });
     if(!res.ok){
       const t = await res.text();
       alert('追加失敗: ' + res.status + ' ' + res.statusText + '\n' + t);
       return;
     }
-  
-    // 入力本文だけクリア。分類は保持する（←ここがポイント）
-    els.text.value = '';
-    saveLastCategory();   // 念のため直近値を保存
+    els.text.value = ''; // 本文だけクリア
     reload();
   }
 
@@ -563,20 +549,24 @@ const editing = new Set();
     reload();
   }
 
-  async function delTodo(id){
-    if(!confirm('削除しますか？')) return;
-    const res = await api('/api/todos/'+id, { method:'DELETE' });
-    if(!res.ok){ alert('削除に失敗しました'); return; }
-    reload();
-  }
-
   async function saveEdit(id, tr){
     const main = tr.querySelector('td[data-role="edit-main"]');
+    if(!main){ alert('編集対象を特定できません'); return; }
     const [catI, textI] = main.querySelectorAll('select,textarea');
-    const payload = { title: catI.value, text: (textI.value || '') };
-    const res = await api('/api/todos/'+id, { method:'PATCH', body: JSON.stringify(payload) });
+    const payload = {
+      title: catI ? String(catI.value||'') : null,
+      text:  textI ? String(textI.value||'') : ''
+    };
+    const res = await api('/api/dig/'+id, { method:'PUT', body: JSON.stringify(payload) });
     if(!res.ok){ alert('保存に失敗しました'); return; }
     editing.delete(id);
+    reload();
+  }
+  
+  async function delDig(id){
+    if(!confirm('削除しますか？')) return;
+    const res = await api('/api/dig/'+id, { method:'DELETE' });
+    if(!res.ok){ alert('削除に失敗しました'); return; }
     reload();
   }
 
