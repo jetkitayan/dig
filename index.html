@@ -625,7 +625,11 @@ const editing = new Set();
   els.random.addEventListener('click', pickRandom);
   els.randNext.addEventListener('click', pickRandom);
   els.randClose.addEventListener('click', ()=>{ els.randomBox.style.display='none'; });
-
+  els.randCancel.addEventListener('click', ()=> { randomEditing = false; buildRandomBox(); });
+  
+  // 「完了にする」は dig には無いので、押したら「次のランダム」に転用:
+  els.randDone.addEventListener('click', pickRandom);
+  
   els.randEdit.addEventListener('click', ()=>{ if(!currentRandom) return; randomEditing = true; buildRandomBox(); });
   els.randCancel.addEventListener('click', ()=> cancelRandomEdit());
   els.randSave.addEventListener('click', ()=> saveRandomEdit());
