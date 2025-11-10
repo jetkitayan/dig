@@ -324,88 +324,69 @@ const editing = new Set();
   function buildRandomBox(){
     if(!currentRandom){ els.randomBox.style.display='none'; return; }
     els.randomBox.style.display = '';
-
+  
     if(randomEditing){
-      // 分類=select、本文=textarea に変更
       const sel = document.createElement('select');
       fillSelectOptions(sel, CATEGORIES, currentRandom.title || 'その他');
       sel.id = 'randCatEdit';
       sel.style.marginRight = '8px';
-
-      els.randCat.replaceWith(sel); // chip -> select
-      els.randCat = sel;
-
+      els.randCat.replaceWith(sel); els.randCat = sel;
+  
       const ta = document.createElement('textarea');
       ta.value = currentRandom.text || '';
       ta.id = 'randTextEdit';
       ta.style.width = '100%';
-      els.randText.replaceWith(ta);
-      els.randText = ta;
-
+      els.randText.replaceWith(ta); els.randText = ta;
+  
       els.randSave.style.display = '';
       els.randCancel.style.display = '';
       els.randEdit.style.display = 'none';
     }else{
-      // 表示モード：chip と div に戻す
       const chip = document.createElement('span');
       chip.textContent = currentRandom.title || 'その他';
       chip.className = 'chip';
       chip.id = 'randCat';
-      els.randCat.replaceWith(chip);
-      els.randCat = chip;
-
+      els.randCat.replaceWith(chip); els.randCat = chip;
+  
       const div = document.createElement('div');
       div.textContent = currentRandom.text || '';
       div.id = 'randText';
       div.style.whiteSpace = 'pre-wrap';
-      els.randText.replaceWith(div);
-      els.randText = div;
-
+      els.randText.replaceWith(div); els.randText = div;
+  
       els.randSave.style.display = 'none';
       els.randCancel.style.display = 'none';
       els.randEdit.style.display = '';
     }
-
     els.randMeta.textContent = '更新: ' + fmtDate(currentRandom.updated_at || '');
   }
-
+  
   function showRandom(it){
     currentRandom = it;
     randomEditing = false;
     buildRandomBox();
-  
-    // 画面にスクロール＆フォーカス移動
     els.randomBox.style.display = '';
-    // 描画反映後にフォーカス（微遅延が安全）
     setTimeout(() => {
-      // 編集中ならテキストエリア、通常ならボックス本体へ
       const ta = document.getElementById('randTextEdit');
-      if (ta) ta.focus();
-      else els.randomBox.focus();
+      if (ta) ta.focus(); else els.randomBox.focus();
     }, 0);
   }
-
+  
   async function saveRandomEdit(){
     if (!currentRandom) return;
-  
     const catEl  = document.getElementById('randCatEdit');
     const textEl = document.getElementById('randTextEdit');
     if (!catEl || !textEl) { alert('編集中の要素が見つかりません'); return; }
   
     const payload = { title: catEl.value, text: textEl.value };
-  
-    const res = await api('/api/todos/' + currentRandom.id, {
-      method: 'PATCH',
+    const res = await api('/api/dig/' + currentRandom.id, {
+      method: 'PUT',
       body: JSON.stringify(payload)
     });
     if (!res.ok) { alert('保存に失敗しました'); return; }
   
-    // 反映のため再取得
-    const one = await api('/api/todos/' + currentRandom.id);
-    if (one.ok) {
-      const { todo } = await one.json();
-      currentRandom = todo || currentRandom;
-    }
+    const one = await api('/api/dig/' + currentRandom.id);
+    if (one.ok) currentRandom = (await one.json());
     randomEditing = false;
     buildRandomBox();
     reload();
