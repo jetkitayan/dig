@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ToDo 管理（Workers + D1）</title>
+  <style>
+    :root{--bg:#fafafa;--fg:#111;--muted:#666;--line:#ddd;--primary:#2563eb;--ok:#16a34a;--danger:#dc2626}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif}
+    header{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;z-index:10}
+    h1{margin:0;font-size:18px}
+    .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px}
+    label{font-size:12px;color:var(--muted)}
+    input,textarea,button,select{font:inherit}
+    input[type="text"], textarea, select{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff}
+    textarea{width:100%;min-height:70px}
+    button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 14px;cursor:pointer}
+    .btn{border-color:transparent;background:var(--primary);color:#fff}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn-danger{background:var(--danger);color:#fff;border-color:transparent}
+    .btn-ghost{background:#fff}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}
+    th{font-size:12px;color:var(--muted)}
+    .strike{text-decoration:line-through;color:#999}
+    .right{margin-left:auto}
+    .counts{font-size:12px;color:var(--muted)}
+    .chip{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);display:inline-block}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="row">
+      <h1>ToDo 管理</h1>
+      <span class="right counts" id="counts">—</span>
+    </div>
+    <div class="row right" style="gap:6px;margin-top:8px">
+      <label>表示</label>
+      <select id="filterDone">
+        <option value="0">未完のみ</option>
+        <option value="all">すべて</option>
+        <option value="1">完了のみ</option>
+      </select>
+
+      <label>検索</label>
+      <input id="q" type="text" size="14" placeholder="キーワード" />
+      <button id="reload" class="btn-ghost">再読込</button>
+
+      <!-- ★ ランダム対象の分類フィルタ -->
+      <label>ランダム分類</label>
+      <select id="randFilter">
+        <option value="__all__">全て</option>
+        <option value="仕事">仕事</option>
+        <option value="プライベート">プライベート</option>
+        <option value="勉強">勉強</option>
+        <option value="その他">その他</option>
+      </select>
+      <button id="random" class="btn-ghost">ランダム</button>
+      <button id="manageCats" class="btn-ghost">カテゴリ管理</button>
+    </div>
+  </header>
+
+  <section id="catPanel" class="card" style="display:none; margin-top:12px">
+    <div class="row" style="gap:8px; align-items:flex-end">
+      <div>
+        <label>新しいカテゴリ名</label><br/>
+        <input id="catNewName" type="text" placeholder="例: 家事" />
+        <button id="catAdd" class="btn" style="margin-left:6px">追加</button>
+      </div>
+      <button id="catClose" class="btn-ghost right">閉じる</button>
+    </div>
+    <div id="catList" style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px"></div>
+    <p class="counts" style="margin-top:8px">
+      ※「その他」は最低1つは残す想定。重複名は不可。削除しても既存ToDoの分類文字列はそのまま残ります。
+    </p>
+  </section>
+  
+  <!-- ランダム表示ボックス -->
+  <section id="randomBox" class="card" style="display:none" tabindex="-1">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span id="randCat" class="chip"></span>
+      <span id="randMeta" class="counts"></span>
+      <button id="randClose" class="btn-ghost right">閉じる</button>
+    </div>
+    <div id="randText" style="white-space:pre-wrap;"></div>
+    <div id="randEditRow" style="margin-top:12px;display:flex;gap:8px">
+      <button id="randEdit" class="btn-ghost">編集</button>
+      <button id="randSave" class="btn" style="display:none">保存</button>
+      <button id="randCancel" class="btn-ghost" style="display:none">取消</button>
+      <span class="right" style="flex:1"></span>
+      <button id="randDone" class="btn">完了にする</button>
+      <button id="randNext" class="btn-ghost">次のランダム</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 style="margin:0 0 12px 0;font-size:16px">新規追加</h2>
+    <div class="row" style="gap:8px;margin-bottom:8px">
+      <select id="category">
+        <option value="仕事">仕事</option>
+        <option value="プライベート">プライベート</option>
+        <option value="勉強">勉強</option>
+        <option value="その他" selected>その他</option>
+      </select>
+      <button id="add" class="btn">追加</button>
+    </div>
+    <textarea id="text" placeholder="やることの本文"></textarea>
+  </section>
+
+  <section class="card" style="padding-top:6px">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px">完了</th>
+          <th>本文</th>
+          <th style="width:220px">更新</th>
+          <th style="width:120px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </section>
+
+<script>
+const editing = new Set();
+
+(function(){
+
+  // ===== カテゴリ管理（localStorage） =====
+  const LS_CATS_KEY = 'todo_categories_v1';
+  const DEFAULT_CATS = ['仕事','プライベート','勉強','その他'];
+  
+  function loadCategories(){
+    try{
+      const v = JSON.parse(localStorage.getItem(LS_CATS_KEY) || '[]');
+      if (Array.isArray(v) && v.length) return dedupKeepOrder(v);
+    }catch{}
+    return DEFAULT_CATS.slice();
+  }
+  
+  function saveCategories(cats){
+    localStorage.setItem(LS_CATS_KEY, JSON.stringify(dedupKeepOrder(cats)));
+  }
+  
+  let CATEGORIES = loadCategories();
+
+  const API_BASE = 'https://memo-save-api.jetkitayan.workers.dev';
+  const USER = 'jet-pay';
+  const PASS = 'kibare@1002';
+
+  const els = {
+    filterDone: document.getElementById('filterDone'),
+    q: document.getElementById('q'),
+    reload: document.getElementById('reload'),
+    // ランダム
+    randFilter: document.getElementById('randFilter'),
+    random: document.getElementById('random'),
+    randomBox: document.getElementById('randomBox'),
+    randCat: document.getElementById('randCat'),
+    randMeta: document.getElementById('randMeta'),
+    randText: document.getElementById('randText'),
+    randEdit: document.getElementById('randEdit'),
+    randSave: document.getElementById('randSave'),
+    randCancel: document.getElementById('randCancel'),
+    randDone: document.getElementById('randDone'),
+    randNext: document.getElementById('randNext'),
+    randClose: document.getElementById('randClose'),
+    // 追加フォーム
+    category: document.getElementById('category'),
+    text: document.getElementById('text'),
+    add: document.getElementById('add'),
+    // 一覧
+    tbody: document.getElementById('tbody'),
+    counts: document.getElementById('counts'),
+
+    manageCats: document.getElementById('manageCats'),
+    catPanel: document.getElementById('catPanel'),
+    catList: document.getElementById('catList'),
+    catNewName: document.getElementById('catNewName'),
+    catAdd: document.getElementById('catAdd'),
+    catClose: document.getElementById('catClose'),
+  };
+
+  let currentRandom = null;  // {id,title,text,...}
+  let randomEditing = false;
+
+  function fillSelectOptions(selectEl, options, selectedValue){
+    selectEl.innerHTML = '';
+    for (const cat of options) {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat;
+      if (selectedValue && selectedValue === cat) opt.selected = true;
+      selectEl.appendChild(opt);
+    }
+  }
+
+  // randFilter を __all__ + CATEGORIES で再構築
+  function fillRandFilter() {
+    const keep = els.randFilter.value; // いまの選択をなるべく維持
+    els.randFilter.innerHTML = '';
+    const optAll = document.createElement('option');
+    optAll.value = '__all__';
+    optAll.textContent = '全て';
+    els.randFilter.appendChild(optAll);
+    for (const cat of CATEGORIES) {
+      const o = document.createElement('option');
+      o.value = cat;
+      o.textContent = cat;
+      els.randFilter.appendChild(o);
+    }
+    // 以前の選択が残っていれば復元、なければ全て
+    els.randFilter.value = [...['__all__'], ...CATEGORIES].includes(keep) ? keep : '__all__';
+  }
+  
+  // 起動時：追加フォームのカテゴリ候補を反映
+  fillSelectOptions(els.category, CATEGORIES, els.category.value);
+  fillRandFilter();
+  
+  els.manageCats.addEventListener('click', openCatPanel);
+  els.catClose.addEventListener('click', closeCatPanel);
+  els.catAdd.addEventListener('click', () => {
+    const name = els.catNewName.value.trim();
+    if (!name) return;
+    if (CATEGORIES.includes(name)) { alert('同名カテゴリがすでにあります'); return; }
+    CATEGORIES.push(name);
+    saveCategories(CATEGORIES);
+    els.catNewName.value = '';
+    // 追加フォームのセレクトにも即反映（選択状態は維持）
+    fillSelectOptions(els.category, CATEGORIES, els.category.value);
+    fillRandFilter();
+    renderCatList();
+  });
+  els.catNewName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') els.catAdd.click();
+  });
+  
+  function openCatPanel(){
+    els.catPanel.style.display = '';
+    renderCatList();
+    els.catNewName.focus();
+  }
+  
+  function closeCatPanel(){
+    els.catPanel.style.display = 'none';
+  }
+  
+  function authHeader(){
+    return USER ? { 'Authorization': 'Basic ' + btoa(USER + ':' + PASS) } : {};
+  }
+
+  async function api(path, opts={}){
+    const headers = { 'Content-Type': 'application/json', ...authHeader(), ...(opts.headers||{}) };
+    try{
+      const res = await fetch(API_BASE + path, { ...opts, headers, mode:'cors' });
+      if(!res.ok){
+        const text = await res.text().catch(()=>'(no body)');
+        console.error('API ERROR', { url: API_BASE + path, status: res.status, statusText: res.statusText, body: text });
+      }
+      return res;
+    }catch(e){
+      alert('通信に失敗しました: ' + (e?.message || e));
+      throw e;
+    }
+  }
+
+  async function reload(){
+    const q = new URLSearchParams();
+    q.set('done', els.filterDone.value);
+    if(els.q.value.trim()) q.set('query', els.q.value.trim());
+    q.set('sort','default');
+    q.set('limit','100');
+
+    const res = await api('/api/todos?' + q.toString());
+    if(!res.ok){ const t = await res.text(); alert('読み込み失敗: ' + res.status + ' ' + res.statusText + '\n' + t); return; }
+    const data = await res.json();
+    render(data.todos || data);
+  }
+
+  // ---- ランダム抽選（分類フィルタ対応） ----
+  async function pickRandom(){
+    // 現在のフィルタ・検索を反映して取得
+    const q = new URLSearchParams();
+    q.set('done', els.filterDone.value);
+    if(els.q.value.trim()) q.set('query', els.q.value.trim());
+    q.set('sort','default');
+    q.set('limit','200');
+
+    const res = await api('/api/todos?' + q.toString());
+    if(!res.ok){ const t = await res.text(); alert('読み込み失敗: ' + res.status + ' ' + res.statusText + '\n' + t); return; }
+    let items = (await res.json()).todos ?? [];
+
+    // ★ 分類フィルタ（titleに分類を保存している）
+    const want = els.randFilter.value;
+    if(want !== '__all__'){
+      items = items.filter(it => (it.title || 'その他') === want);
+    }
+
+    if(!items.length){ alert('該当データがありません'); return; }
+    const it = items[Math.floor(Math.random() * items.length)];
+    showRandom(it);
+  }
+
+  // ---- ランダム表示ボックスの描画/編集 ----
+  function buildRandomBox(){
+    if(!currentRandom){ els.randomBox.style.display='none'; return; }
+    els.randomBox.style.display = '';
+
+    if(randomEditing){
+      // 分類=select、本文=textarea に変更
+      const sel = document.createElement('select');
+      fillSelectOptions(sel, CATEGORIES, currentRandom.title || 'その他');
+      sel.id = 'randCatEdit';
+      sel.style.marginRight = '8px';
+
+      els.randCat.replaceWith(sel); // chip -> select
+      els.randCat = sel;
+
+      const ta = document.createElement('textarea');
+      ta.value = currentRandom.text || '';
+      ta.id = 'randTextEdit';
+      ta.style.width = '100%';
+      els.randText.replaceWith(ta);
+      els.randText = ta;
+
+      els.randSave.style.display = '';
+      els.randCancel.style.display = '';
+      els.randEdit.style.display = 'none';
+    }else{
+      // 表示モード：chip と div に戻す
+      const chip = document.createElement('span');
+      chip.textContent = currentRandom.title || 'その他';
+      chip.className = 'chip';
+      chip.id = 'randCat';
+      els.randCat.replaceWith(chip);
+      els.randCat = chip;
+
+      const div = document.createElement('div');
+      div.textContent = currentRandom.text || '';
+      div.id = 'randText';
+      div.style.whiteSpace = 'pre-wrap';
+      els.randText.replaceWith(div);
+      els.randText = div;
+
+      els.randSave.style.display = 'none';
+      els.randCancel.style.display = 'none';
+      els.randEdit.style.display = '';
+    }
+
+    els.randMeta.textContent = '更新: ' + fmtDate(currentRandom.updated_at || '');
+  }
+
+  function showRandom(it){
+    currentRandom = it;
+    randomEditing = false;
+    buildRandomBox();
+  
+    // 画面にスクロール＆フォーカス移動
+    els.randomBox.style.display = '';
+    // 描画反映後にフォーカス（微遅延が安全）
+    setTimeout(() => {
+      // 編集中ならテキストエリア、通常ならボックス本体へ
+      const ta = document.getElementById('randTextEdit');
+      if (ta) ta.focus();
+      else els.randomBox.focus();
+    }, 0);
+  }
+
+  async function saveRandomEdit(){
+    if (!currentRandom) return;
+  
+    const catEl  = document.getElementById('randCatEdit');
+    const textEl = document.getElementById('randTextEdit');
+    if (!catEl || !textEl) { alert('編集中の要素が見つかりません'); return; }
+  
+    const payload = { title: catEl.value, text: textEl.value };
+  
+    const res = await api('/api/todos/' + currentRandom.id, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { alert('保存に失敗しました'); return; }
+  
+    // 反映のため再取得
+    const one = await api('/api/todos/' + currentRandom.id);
+    if (one.ok) {
+      const { todo } = await one.json();
+      currentRandom = todo || currentRandom;
+    }
+    randomEditing = false;
+    buildRandomBox();
+    reload();
+  }
+
+  function cancelRandomEdit(){
+    randomEditing = false;
+    buildRandomBox();
+  }
+
+  function fmtDate(s){ if(!s) return ''; return s.replace('T',' ').replace('Z',''); }
+
+  // ---- 一覧描画/編集 ----
+  function render(items){
+    els.tbody.innerHTML = '';
+    let todo = 0, done = 0;
+    items.forEach(it=>{ if(it.done) done++; else todo++; });
+
+    for(const it of items){
+      const tr = document.createElement('tr');
+
+      const td0 = document.createElement('td');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!it.done;
+      cb.addEventListener('change', ()=> toggleDone(it.id, cb.checked));
+      td0.appendChild(cb);
+
+      const isEdit = editing.has(it.id);
+
+      const td1 = document.createElement('td');
+      if(isEdit){
+        const catI = document.createElement('select');
+        fillSelectOptions(catI, CATEGORIES, it.title || 'その他');
+        catI.style.display = 'block';
+        catI.style.marginBottom = '6px';
+
+        const textI = document.createElement('textarea');
+        textI.value = it.text || '';
+        textI.style.width = '100%';
+
+        td1.append(catI, textI);
+        td1.dataset.role = 'edit-main';
+      }else{
+        const cat = document.createElement('span');
+        cat.textContent = it.title || 'その他';
+        cat.className = 'chip';
+        cat.style.marginRight = '8px';
+
+        const text = document.createElement('div');
+        text.textContent = it.text || '';
+        if(it.done){ cat.classList.add('strike'); text.classList.add('strike'); }
+
+        td1.append(cat, text);
+      }
+
+      const td3 = document.createElement('td');
+      const up = document.createElement('div'); up.textContent = '更新: ' + fmtDate(it.updated_at || '');
+      const dn = document.createElement('div'); dn.textContent = it.done_at ? ('完了: ' + fmtDate(it.done_at)) : '';
+      td3.append(up, dn);
+
+      const td4 = document.createElement('td');
+      if(isEdit){
+        const btnSave = document.createElement('button'); btnSave.className='btn'; btnSave.textContent='保存';
+        btnSave.onclick = ()=> saveEdit(it.id, tr);
+        const btnCancel = document.createElement('button'); btnCancel.className='btn-ghost'; btnCancel.style.marginLeft='6px'; btnCancel.textContent='取消';
+        btnCancel.onclick = ()=> { editing.delete(it.id); reload(); };
+        td4.append(btnSave, btnCancel);
+      }else{
+        const btnEdit = document.createElement('button'); btnEdit.className='btn-ghost'; btnEdit.textContent='編集';
+        btnEdit.onclick = ()=> { editing.add(it.id); reload(); };
+        const btnDel = document.createElement('button'); btnDel.className='btn-danger'; btnDel.style.marginLeft='6px'; btnDel.textContent='削除';
+        btnDel.onclick = ()=> delTodo(it.id);
+        td4.append(btnEdit, btnDel);
+      }
+
+      tr.append(td0, td1, td3, td4);
+      els.tbody.appendChild(tr);
+    }
+    els.counts.textContent = `未完 ${todo} / 完了 ${done}`;
+  }
+
+  async function add(){
+    const payload = {
+      title: els.category.value,     // 分類
+      text: els.text.value.trim(),
+    };
+    if(!payload.text){ alert('本文を入力してください'); return; }
+  
+    const res = await api('/api/todos', { method:'POST', body: JSON.stringify(payload) });
+    if(!res.ok){
+      const t = await res.text();
+      alert('追加失敗: ' + res.status + ' ' + res.statusText + '\n' + t);
+      return;
+    }
+  
+    // 入力本文だけクリア。分類は保持する（←ここがポイント）
+    els.text.value = '';
+    saveLastCategory();   // 念のため直近値を保存
+    reload();
+  }
+
+  function renderCatList(){
+    els.catList.innerHTML = '';
+    for (const cat of CATEGORIES) {
+      const wrap = document.createElement('div');
+      wrap.style.display = 'inline-flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '6px';
+      wrap.style.border = '1px solid var(--line)';
+      wrap.style.borderRadius = '999px';
+      wrap.style.padding = '4px 8px';
+      wrap.style.background = '#fff';
+  
+      const label = document.createElement('span');
+      label.textContent = cat;
+  
+      const del = document.createElement('button');
+      del.textContent = '×';
+      del.className = 'btn-ghost';
+      del.style.border = 'none';
+      del.style.padding = '2px 8px';
+      del.style.cursor = 'pointer';
+      del.title = '削除';
+  
+      // “その他”だけは削除不可にする例（好みで外せます）
+      if (cat === 'その他') {
+        del.disabled = true;
+        del.title = 'このカテゴリは削除不可';
+        del.style.opacity = .4;
+        del.style.cursor = 'not-allowed';
+      } else {
+        del.addEventListener('click', () => {
+          CATEGORIES = CATEGORIES.filter(c => c !== cat);
+          saveCategories(CATEGORIES);
+          // 追加フォームのセレクトにも即反映
+          fillSelectOptions(els.category, CATEGORIES, els.category.value);
+          fillRandFilter();
+          // 編集行は再描画で反映（reload）
+          renderCatList();
+          // 画面にも即反映させたい場合はreload()（通信あり）
+          // reload();
+        });
+      }
+  
+      wrap.append(label, del);
+      els.catList.appendChild(wrap);
+    }
+  }
+  
+  function openCatPanel(){
+    els.catPanel.style.display = '';
+    renderCatList();
+    els.catNewName.focus();
+  }
+  
+  function closeCatPanel(){
+    els.catPanel.style.display = 'none';
+  }
+  
+  function dedupKeepOrder(arr){
+    const seen = new Set();
+    const out = [];
+    for (const s of arr.map(x=>String(x).trim()).filter(Boolean)) {
+      if (!seen.has(s)) { seen.add(s); out.push(s); }
+    }
+    return out;
+  }
+  
+  async function toggleDone(id, v){
+    const res = await api('/api/todos/'+id, { method:'PATCH', body: JSON.stringify({ done: !!v }) });
+    if(!res.ok){ alert('更新に失敗しました'); return; }
+    reload();
+  }
+
+  async function delTodo(id){
+    if(!confirm('削除しますか？')) return;
+    const res = await api('/api/todos/'+id, { method:'DELETE' });
+    if(!res.ok){ alert('削除に失敗しました'); return; }
+    reload();
+  }
+
+  async function saveEdit(id, tr){
+    const main = tr.querySelector('td[data-role="edit-main"]');
+    const [catI, textI] = main.querySelectorAll('select,textarea');
+    const payload = { title: catI.value, text: (textI.value || '') };
+    const res = await api('/api/todos/'+id, { method:'PATCH', body: JSON.stringify(payload) });
+    if(!res.ok){ alert('保存に失敗しました'); return; }
+    editing.delete(id);
+    reload();
+  }
+
+  // デバッグ：自己テスト
+  async function selfTest(){
+    let r = await api('/api/todos?done=all&limit=1');
+    console.log('TEST todos GET', r.status, r.statusText);
+  }
+
+  // 追加：最後に使った分類を保存/復元
+  const LS_LAST_CAT = 'todo_last_category_v1';
+  
+  function loadLastCategory(){
+    const v = localStorage.getItem(LS_LAST_CAT);
+    if (v) els.category.value = v;
+  }
+  function saveLastCategory(){
+    localStorage.setItem(LS_LAST_CAT, els.category.value);
+  }
+  
+  // 起動時に復元
+  loadLastCategory();
+  // UIで変更されたら即保存
+  els.category.addEventListener('change', saveLastCategory);
+
+  // イベント
+  els.add.addEventListener('click', add);
+  els.reload.addEventListener('click', reload);
+  els.filterDone.addEventListener('change', reload);
+  els.q.addEventListener('keydown', e=>{ if(e.key==='Enter') reload(); });
+
+  els.random.addEventListener('click', pickRandom);
+  els.randNext.addEventListener('click', pickRandom);
+  els.randClose.addEventListener('click', ()=>{ els.randomBox.style.display='none'; });
+
+  els.randEdit.addEventListener('click', ()=>{ if(!currentRandom) return; randomEditing = true; buildRandomBox(); });
+  els.randCancel.addEventListener('click', ()=> cancelRandomEdit());
+  els.randSave.addEventListener('click', ()=> saveRandomEdit());
+
+  els.randDone.addEventListener('click', async ()=>{
+    if(!currentRandom) return;
+    const res = await api('/api/todos/'+currentRandom.id, { method:'PATCH', body: JSON.stringify({ done: true }) });
+    if(!res.ok){ alert('更新に失敗しました'); return; }
+    await reload();
+    pickRandom();
+  });
+
+  // 初期表示
+  reload().then(selfTest);
+})();
+</script>
+</body>
+</html>
